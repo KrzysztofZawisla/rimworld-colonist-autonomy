@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Defs>
+  <JobDef>
+    <defName>SmartColonists_ClefSocialize</defName>
+    <driverClass>SmartColonistsCompanion.ClefSocialJobDriver</driverClass>
+    <reportString>socializing with TargetA.</reportString>
+    <casualInterruptible>true</casualInterruptible>
+    <playerInterruptible>true</playerInterruptible>
+  </JobDef>
+</Defs>

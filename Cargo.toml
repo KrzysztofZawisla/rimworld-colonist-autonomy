@@ -1,0 +1,36 @@
+[package]
+name = "colonist_autonomy"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[package.metadata]
+
+[package.metadata.rimworld]
+mod-name = "ColonistAutonomy"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rimworld-rs = { path = "../rimworld-rs/crates/rimworld-rs" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+ureq = { version = "2", default-features = false, features = ["json", "tls"] }
+sha2 = "0.10"
+flate2 = { version = "1", default-features = false, features = [
+  "rust_backend",
+] }
+tar = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[profile]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+incremental = false
+debug = false
+overflow-checks = false
