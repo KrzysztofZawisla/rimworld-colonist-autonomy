@@ -17,8 +17,10 @@ actions prepared by the game, and the mod applies regular RimWorld jobs.
 Three parts:
 
 - `src/` — Rust bridge: settings, HTTP worker, decision cache and scheduling, answer
-  selection, llama-server lifecycle, and the dependency installer.
-- `companion/` — C# assembly: `ClefThinkNode`, state and candidate building, and job drivers.
+  selection, llama-server lifecycle, the Harmony schedule-gate install, and the dependency
+  installer.
+- `companion/` — C# assembly: `ClefThinkNode`, `ClefGatedThinkNode`, state and candidate
+  building, the sleep-schedule gate, job drivers, and the in-game self-test.
 - `mod/` — XML defs plus `About/` metadata and licenses.
 
 ## Commands
@@ -32,13 +34,13 @@ Three parts:
 The mod ships one native library per platform under `Rust/<rid>/`; build all of them before
 publishing so the same mod folder keeps working on Windows, Linux and macOS.
 
-The settings page uses `SettingSpec::action`/`label`/`choice` and the `settings_label` companion event,
-so the `rimworld-rs` checkout must be the line that still provides them (`master` or
-`feature/action-buttons`). The `chore/logic-replaced-by-libraries` branch removed those widgets.
-
 ## Conventions
 
 - Follow the existing style; do not add comments unless they explain non-obvious logic.
 - Keep the game thread non-blocking: all HTTP work stays on the worker thread and results are
   applied in `on_tick`.
 - Pin every downloaded dependency version and verify size and SHA256 before use.
+- Update the documentation in the same change. Whenever behavior, defaults, settings,
+  requirements, commands, or file layout change, update every affected document
+  (`README.md`, `WORKSHOP.md`, `workshop/`, `mod/About/`) so the docs describe the code as it
+  is, not as it was.

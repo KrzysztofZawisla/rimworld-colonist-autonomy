@@ -3,7 +3,7 @@
 A RimWorld 1.7 mod where colonists ask a local decision model what to do. The default model is
 [Cloudflare Clef](https://huggingface.co/Cloudflare/clef) (GGUF, `llama-server`). The current
 client targets llama-server's `/v1/systemone` decision API; another provider needs an adapter.
-The model does not generate text: it receives a colonist's state and a closed set of options,
+The model does not generate text: it receives the colony state and a closed set of options,
 and returns a choice with probabilities via `POST /v1/systemone`.
 
 **Built with:** [rimworld-rs](https://github.com/KrzysztofZawisla/rimworld-rs)
@@ -23,13 +23,17 @@ The native bridge and build tooling come from
 - **Rust** — settings, HTTP thread, decision cache, scheduling, and answer selection.
   No request blocks the game thread: HTTP runs on a separate thread and the result is applied
   in `on_tick`. A single request serves the whole colony: the state contains every colonist,
-  and questions are keyed as `p<id>_action` / `p<id>_intent`. The HTTP client shares one
-  `ureq::Agent` (keep-alive) and rebuilds it only when the URL or timeout changes.
+  and questions are keyed as `p<id>_action` / `p<id>_intent`. The refresh also covers working
+  colonists: with **Interrupt current work** on, a job at least 5 seconds old can be replaced
+  (see Settings). The HTTP client shares one `ureq::Agent` (keep-alive) and rebuilds it only
+  when the URL or timeout changes.
 - **C# companion** — a `ClefThinkNode` hooked into vanilla `Humanlike_PostMain` (that is,
-  after normal work/needs and before idling), state and candidate building, and creating
-  `Job`s through vanilla `JobGiver`/`WorkGiver`.
-- **Harmony bridge** — the ThinkTree is plain XML, but the bridge uses Harmony for game events;
-  no custom ThinkTree patch is needed.
+  after normal work/needs and before idling), a `ClefGatedThinkNode` at `Humanlike_PreMain` for
+  pawns refused by the sleep-schedule gate, state and candidate building, and creating `Job`s
+  through vanilla `JobGiver`/`WorkGiver`.
+- **Harmony bridge** — both ThinkTrees are plain XML, but the bridge uses Harmony for game
+  events and for the schedule-gate prefix on `Pawn_JobTracker.StartJob`; no custom ThinkTree
+  patch is needed.
 
 ## Requirements
 
@@ -42,9 +46,6 @@ The native bridge and build tooling come from
   [rimworld-rs](https://github.com/KrzysztofZawisla/rimworld-rs) checkout with `game-refs/`
   (`cargo xtask setup`). Cross-platform builds additionally use `cargo-zigbuild` (Linux/macOS)
   and `cargo-xwin` (Windows), as described by the toolkit.
-- Use the `rimworld-rs` line that still has `SettingSpec::action`/`label` (`master` or
-  `feature/action-buttons`). The installer draws real settings buttons and a live status label;
-  the newer `chore/logic-replaced-by-libraries` branch removed those widgets.
 
 ## Model
 
@@ -83,7 +84,7 @@ paths; the server can also be started manually as shown above.
 
 ### Dependency installer
 
-The mod settings page has six action buttons and a status line:
+The dependency section has five action buttons and a status line:
 
 - **Install / check dependencies** — checks the paths and fetches missing items one by one.
 - **Install llama.cpp (Vulkan)** on Windows and Linux, **Install llama.cpp (Metal)** on macOS —
@@ -167,8 +168,9 @@ Enable **Colonist Autonomy** in the mod list. For testing, you can also launch t
 `-mod=snowdrop.colonistautonomy`.
 
 **Harmony** is required for the game events used by server auto-start/auto-stop
-(`game_started`/`game_loaded`). Without Harmony, the ThinkTree and installer still work, but
-the bridge disables those events and auto-start will not run. Quicktests had Harmony loaded.
+(`game_started`/`game_loaded`) and for the sleep-schedule gate (a `Pawn_JobTracker.StartJob`
+prefix). Without Harmony, both ThinkTrees, the installer and the settings still work, but the
+gate is unavailable and auto-start will not run. Quicktests had Harmony loaded.
 
 ## Settings
 
@@ -183,7 +185,7 @@ the bridge disables those events and auto-start will not run. Quicktests had Har
 | Model file (.gguf) | `<install root>/models/Cloudflare_clef-flash-Q8_0.gguf` | Model passed as `-m` (auto-start/installer); the Q4 model can be selected instead. |
 | llama-server extra args | `-ngl 99 -c 16384 -b 8192 -ub 8192` | Extra arguments; the mod adds `-m`, `--host`, and `--port` itself. |
 | Refresh seconds | 30 | How often decisions are refreshed. |
-| Base confidence | 0.40 | The base for the per-action thresholds: work is relative to the question size (`max(0.20, 2.5 / options)`), capped at the old work baseline (`base - 0.10`), social 0.40, needs 0.35, threat 0.20, idle 0.50 (0.60 when alternatives exist), interrupt 0.60. At 16 options work is 0.20, at 8 it is 0.30, and at 6 or fewer it is 0.30. The decision panel shows the threshold and option count used for each decision. |
+| Base confidence | 0.40 | The base for the per-action thresholds: work is relative to the question size (`max(0.20, 2.5 / options)`), capped at the old work baseline (`base - 0.10`), social 0.40, drug 0.40, needs 0.35, threat 0.20, idle 0.50 (0.60 when alternatives exist), interrupt 0.60. At 16 options work is 0.20, at 8 it is 0.30, and at 6 or fewer it is 0.30. The decision panel shows the threshold and option count used for each decision. |
 | Interrupt current work | true | Whether an active refresh may interrupt current work. Interrupts also need the interrupt confidence and a job at least 5 seconds old; important jobs stay protected. |
 | Respect sleep schedule | true | Refuses a work job when the estimated travel plus work would not fit before the colonist's next Sleep block. Player-forced jobs, drafted/mental pawns, and firefighting, patient, and doctor work are never refused. The estimate is conservative (straight-line distance, 1.35x for obstacles) and does not reserve anything. A refused pawn is picked up by the `Humanlike_PreMain` fallback node so it can still choose a local action. |
 | Dry run | false | The model is asked and decisions are logged, but no jobs are issued. |
@@ -194,13 +196,14 @@ the bridge disables those events and auto-start will not run. Quicktests had Har
 
 The **Decision mode** dropdown in the mod options offers:
 
-- **Intent (game picks target)** — a single `intent` question: food/sleep/joy, drugs allowed by
-  the pawn's policy, work type (`work:Hauling`, `work:PlantCutting`, ...), social, flee, idle.
-  Vanilla picks the concrete target.
+- **Intent (game picks target)** — a single `intent` question: food/sleep/joy, a drug stack
+  allowed by the pawn's policy, work type (`work:Hauling`, `work:PlantCutting`, ...), social,
+  flee, idle. Vanilla picks the concrete target for work and needs; a drug choice names the
+  stack.
 - **Action (model picks target)** — the default. One flat list of concrete actions:
   `work:PlantsCut:<id>`, `drug:<id>`, `social:<id>`, `eat`, `sleep`, `joy`, `flee`, `hide`,
-  `idle`. For work/social/flee the model also picks the target; for needs and drugs, vanilla
-  picks the target (best meal/bed/joy/drug).
+  `idle`. For work and social the model also picks the target, and a drug choice names the
+  stack; for eat/sleep/joy vanilla picks the target (best meal/bed/joy).
 - **Intent + target (two steps)** — one request with several questions: `intent` +
   `work_target`/`social_target`/`threat_target`. The model compares targets only within the
   chosen intent.
@@ -241,7 +244,7 @@ shows the threshold that was applied to each entry.
 
 ## Signals passed to the model
 
-Besides the basic state (work, needs, skills, relations), every pawn receives `signals`:
+Besides the basic state (work, needs, skills, traits), every pawn receives `signals`:
 
 - **Urgency:** `food`/`rest`/`joy` categories (`Starving`, `Tired`, `Low`, ...), `mood`, and
   break thresholds (`break.minor/major/extreme`).
@@ -250,8 +253,8 @@ Besides the basic state (work, needs, skills, relations), every pawn receives `s
 - **Time:** `hour`, `assignment` (`Work`/`Joy`/`Sleep`, ...), `night_in`, `sleep` (scheduled
   sleep).
 - **Environment:** `temp`, `light`, `indoors`, `room_temp`, `beauty`, `impressive`, `clean`.
-- **Contact:** relations (`spouse`, `lover`, `fiance`, `ex-*`, `rival`, `friend`, `neutral`),
-  opinion, and the `CanInteractNowWith` filter.
+- **Contact:** the social options carry relations (`spouse`, `lover`, `fiance`, `ex-*`, `rival`,
+  `friend`, `neutral`), opinion, and the `CanInteractNowWith` filter.
 
 At the `colony` level: `colonists`, `idle`, `meals`, `medicine`, `steel`, `components`,
 `silver`, `wood`, `food_nutrition`, `power_stored`, `power_gain`, `bills`, `growing_zones`,
@@ -287,9 +290,9 @@ Look for `[ColonistAutonomy]` lines:
 [ColonistAutonomy] settings: enabled=true mode=action refresh=30s ... auto_start=true server=http://127.0.0.1:8081
 [ColonistAutonomy] auto-start: started llama-server (pid 1234, log: .../ColonistAutonomy/llama-server.log)
 [ColonistAutonomy] auto-start: stopped llama-server
-[ColonistAutonomy] Kimmy: work:PlantsCut:14072 (confidence 0.66, mode action)
+[ColonistAutonomy] Kimmy: work:PlantsCut:14072 (confidence 0.66 >= 0.20 work, 16 options, mode action) [work:PlantsCut:14072=0.66, ...]
 [ColonistAutonomy] applied CutPlantDesignated to Kimmy (cutting: bamboo tree.)
-[ColonistAutonomy] Erickson: joy (confidence 0.31 < 0.40) -> vanilla
+[ColonistAutonomy] Erickson: joy (confidence 0.31 < 0.35 need, 16 options) -> vanilla
 [ColonistAutonomy] WARN transport: ... (os error ...)
 ```
 
@@ -336,7 +339,7 @@ BBCode in `workshop/description.bbcode.txt`); `WORKSHOP.md` keeps the longer sou
   and after three errors the mod backs off for 60 s and hands decisions back to vanilla. Switch
   back to the Flash model for faster iterations.
 - The build script compiles the native library for the host platform by default. Use
-  `--all-targets` (`-AllTargets`) for a folder that also carries `win-x64`, `osx-x64` and
+  `--all-targets` for a folder that also carries `win-x64`, `linux-x64`, `osx-x64` and
   `osx-arm64`.
 - The dependency installer supports Windows x64, Linux x64 and macOS (x64 / Apple Silicon).
 - There is no `llama-server` auto-start when dependencies are missing; the mod shows a one-time
@@ -349,13 +352,12 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 ```
 
-Run them against the same `rimworld-rs` line used to build (the one with
-`SettingSpec::action`/`label`/`choice`). Unit tests cover the response parser, mode selection,
-state truncation, settings, per-action and relative work thresholds, the drug action kind and
-threshold, the server health probe, Hybrid selection, unique-target keys, and the installer
-helpers. Verified in game on Linux: mod and companion startup, the HTTP decision loop
-against a local server, low confidence → vanilla, and actual job application in the original
-three modes plus Hybrid (`SmartColonists_ClefSocialize`).
+Run them against the same `rimworld-rs` line used to build. Unit tests cover the response
+parser, mode selection, state truncation, settings, per-action and relative work thresholds,
+the drug action kind and threshold, the server health probe, Hybrid selection, unique-target
+keys, and the installer helpers. Verified in game on Linux: mod and companion startup, the HTTP
+decision loop against a local server, low confidence → vanilla, and actual job application in
+the original three modes plus Hybrid (`SmartColonists_ClefSocialize`).
 
 On macOS the in-game check covered mod and companion startup, the HTTP decision loop against a
 local server, server auto-start with the expected arguments, and server stop when the game
