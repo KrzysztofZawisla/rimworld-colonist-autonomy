@@ -165,7 +165,7 @@ Windows target, exactly as documented by `rimworld-rs`.
 ## Enabling
 
 Enable **Colonist Autonomy** in the mod list. For testing, you can also launch the game with
-`-mod=krzysztofzawisla.colonistautonomy`.
+`-mod=snowdrop.colonistautonomy`.
 
 **Harmony** is required for the game events used by server auto-start/auto-stop
 (`game_started`/`game_loaded`). Without Harmony, the ThinkTree and installer still work, but
