@@ -36,6 +36,7 @@ the description.
 
 - Steam renders `[h1]`, `[h2]`, `[b]`, `[list]`, `[*]`, `[url]`, `[img]` and `[hr][/hr]`.
 - Do not paste Markdown headings or `**bold**`; Steam shows them literally.
-- The description should stay readable in the Steam app and in a browser. The BBCode above uses
+- The description should stay readable in the Steam app and in a browser. The BBCode file uses
   short paragraphs and lists for that reason.
-- If you edit the copy, update both this file and `description.bbcode.txt`.
+- If you edit the copy, update `description.bbcode.txt`; `../WORKSHOP.md` keeps the longer
+  source draft.

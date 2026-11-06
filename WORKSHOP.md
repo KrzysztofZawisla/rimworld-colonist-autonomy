@@ -5,10 +5,11 @@ The Steam-ready BBCode and the upload steps are in `workshop/DESCRIPTION.md` and
 
 ## Colonist Autonomy
 
-Colonists can ask a local decision model what to do when vanilla has no job for them. The
-default model is Cloudflare Clef; the mod only ranks a closed list of actions prepared by the
-game, then builds and applies normal RimWorld jobs. It does not use the cloud and does not send
-colony data anywhere except the local server.
+Colonists can ask a local decision model what to do when vanilla has no job for them — and,
+with **Interrupt current work** on, when a better job is available. The default model is
+Cloudflare Clef; the mod only ranks a closed list of actions prepared by the game, then builds
+and applies normal RimWorld jobs. It does not use the cloud and does not send colony data
+anywhere except the local server.
 
 ### Requirements
 
@@ -51,13 +52,27 @@ The native bridge and build tooling are built with
 - The models are Apache-2.0; llama.cpp is MIT. Full notices and licenses are included in
   `About/THIRD_PARTY_NOTICES.md`.
 
+### Behaviour
+
+- **Needs and drugs.** `eat`, `sleep` and `joy` are built by vanilla's own job givers; drug
+  candidates are concrete stacks and only appear when the pawn's drug policy allows them for
+  joy and the mood/joy thresholds match. Scheduled drugs and tending stay with vanilla.
+- **Sleep schedule.** With **Respect sleep schedule** on (default), a work job whose travel
+  plus estimated work does not fit before the next Sleep block is refused before it starts; the
+  colonist gets a local action instead, so it does not stand idle.
+- **Interrupts.** A job at least 5 seconds old can be replaced when the model is at least 60%
+  confident; eating, sleeping, tending, fleeing, drafted, bleeding and player-forced jobs are
+  never interrupted.
+- **Multiplayer is not supported.** Model-driven jobs and the schedule gate run on the local
+  client only; expect desyncs with multiplayer mods.
+
 ### Notes
 
 - The mod is a client. It does not start the model server until the dependencies are installed
   and **Auto-start llama-server** is enabled.
 - Decisions are made locally. The mod does not send colony state to an external service.
-- Auto-start/stop uses Harmony game events; without Harmony the mod's settings still open, but
-  automatic server lifecycle is disabled.
+- Auto-start/stop and the sleep-schedule gate use Harmony. Without Harmony the mod's settings
+  still open, but automatic server lifecycle is disabled and the gate is unavailable.
 
 ### Disclaimer
 

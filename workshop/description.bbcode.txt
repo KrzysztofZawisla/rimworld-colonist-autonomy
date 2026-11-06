@@ -1,7 +1,7 @@
 [h1]Colonist Autonomy[/h1]
 [b]A local decision model for what your colonists do next.[/b]
 
-Colonist Autonomy gives idle colonists a second opinion. When vanilla RimWorld has no job for a colonist, the mod builds a closed list of actions the game can actually perform, asks a local model to rank them, and turns the winner into a normal RimWorld job. The model never writes text, and your colony data stays on your machine.
+Colonist Autonomy gives your colonists a second opinion. When vanilla RimWorld has no job for a colonist — or another job would be better and interrupts are on — the mod builds a closed list of actions the game can actually perform, asks a local model to rank them, and turns the winner into a normal RimWorld job. The model never writes text, and your colony data stays on your machine.
 
 [h2]How it works[/h2]
 [list]
@@ -12,23 +12,30 @@ Colonist Autonomy gives idle colonists a second opinion. When vanilla RimWorld h
 [/list]
 [img]PASTE_URL_FOR_HOW_IT_WORKS_IMAGE[/img]
 
+[h2]More than idling[/h2]
+[list]
+[*][b]Interrupts.[/b] With [b]Interrupt current work[/b] on (default), a job that has run for at least 5 seconds can be replaced when the model is at least 60% confident. Eating, sleeping, tending, fleeing, drafted, bleeding and player-forced jobs are never interrupted.
+[*][b]Drugs.[/b] If your drug policy allows a drug for joy and its mood/joy thresholds match, the model can choose that stack. The policy is never overridden, and scheduled drugs stay with vanilla.
+[*][b]Sleep schedule.[/b] With [b]Respect sleep schedule[/b] on (default), a far job that cannot finish before the next Sleep block is refused before it starts; the colonist gets a local action instead.
+[/list]
+
 [h2]Decision modes[/h2]
 [list]
-[*][b]Intent.[/b] The model picks the goal. The game picks the exact target.
-[*][b]Action (default).[/b] The model picks the job and its target. Needs still use the game's target.
+[*][b]Intent.[/b] The model picks the goal. The game picks the exact target for work and needs; a drug choice names the stack.
+[*][b]Action (default).[/b] The model picks the job, its work/social target and a drug stack. Needs still use the game's target.
 [*][b]Intent and target.[/b] The model answers twice in one request: intent first, then the target inside it.
 [*][b]Hybrid (auto).[/b] Uses Intent when no concrete target exists and Action when one does.
 [/list]
 [img]PASTE_URL_FOR_DECISION_MODES_IMAGE[/img]
 
 [h2]Models[/h2]
-The installer can fetch llama.cpp and one model on Windows x64, Linux x64 and macOS.
+The installer can fetch llama.cpp and either model on Windows x64, Linux x64 and macOS.
 [list]
 [*][b]Clef Flash Q8 (recommended).[/b] 9B, 9.7 GB download, about 16 GB VRAM at 16k context. Fast and light.
 [*][b]Clef Q4 (optional).[/b] 27B, 17.6 GB download, 24 GB or more VRAM. Higher quality, slower.
 [/list]
 [img]PASTE_URL_FOR_MODELS_IMAGE[/img]
-The server runs locally. You can point the mod at another llama-server model that supports `/v1/systemone`; Clef is the model the installer ships.
+The server runs locally. You can point the mod at another llama-server model that supports `/v1/systemone`; Clef is the model the installer installs.
 
 [h2]Requirements[/h2]
 [list]
@@ -53,7 +60,8 @@ The server runs locally. You can point the mod at another llama-server model tha
 [*]Decisions are made locally. Colony data is sent only to your local server.
 [*]The mod runs HTTP on a worker thread, so the game does not wait for the model.
 [*]Low confidence hands the decision back to vanilla.
-[*]Auto-start is off by default. Auto-start and auto-stop use Harmony game events. Without Harmony, the settings still open.
+[*]Auto-start is off by default. Auto-start, auto-stop and the sleep-schedule gate use Harmony. Without Harmony, the settings still open, but the server lifecycle and the gate are unavailable.
+[*]Multiplayer is not supported. Model-driven jobs and the schedule gate run on the local client only.
 [/list]
 
 [h2]Source code[/h2]
