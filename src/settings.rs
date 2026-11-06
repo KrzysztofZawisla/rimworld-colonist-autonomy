@@ -181,6 +181,7 @@ pub fn register(ctx: &mut Context) -> rimworld_rs::Result<()> {
             "llama-server extra args",
             "-ngl 99 -c 16384 -b 8192 -ub 8192",
         ),
+        SettingSpec::label("deps_status", "Dependencies"),
         SettingSpec::action("deps_install", "Install / check dependencies"),
         SettingSpec::action("deps_install_llama", &install_llama),
         SettingSpec::action(
@@ -192,8 +193,6 @@ pub fn register(ctx: &mut Context) -> rimworld_rs::Result<()> {
             "Download Clef Q4 (17.6 GB) — optional",
         ),
         SettingSpec::action("deps_cancel", "Cancel dependency download"),
-        SettingSpec::action("deps_check", "Check dependencies"),
-        SettingSpec::label("deps_status", "Dependencies"),
     ])
 }
 

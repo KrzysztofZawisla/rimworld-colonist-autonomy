@@ -102,7 +102,6 @@ The mod settings page has six action buttons and a status line:
   `server_model`. A fresh install points at the Flash model.
 - **Cancel dependency download** — stops the active download; the `.part` file remains and the
   next click resumes the transfer.
-- **Check dependencies** — refreshes the status line without downloading.
 
 The managed install root is per user and per platform (`COLONIST_AUTONOMY_HOME` overrides it,
 which is useful for tests and portable installs):

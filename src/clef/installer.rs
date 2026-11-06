@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rimworld_rs::prelude::*;
 use sha2::{Digest, Sha256};
@@ -91,6 +91,9 @@ const CLEF_FLASH_URL: &str = "https://huggingface.co/bartowski/Cloudflare_clef-f
 const CLEF_FLASH_SHA256: &str = "55c222dfc9f5760d06015ee6d6452ea45113bb6f333178c345c489dbc134bcfe";
 const CLEF_FLASH_BYTES: u64 = 9_675_741_344;
 pub(crate) const CLEF_FLASH_FILE: &str = "Cloudflare_clef-flash-Q8_0.gguf";
+
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
+const PROGRESS_BAR_WIDTH: usize = 12;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ModelChoice {
@@ -183,6 +186,90 @@ fn describe(settings: &Settings) -> String {
     )
 }
 
+fn progress_bar(fraction: f64) -> String {
+    let fraction = fraction.clamp(0.0, 1.0);
+    let filled = (fraction * PROGRESS_BAR_WIDTH as f64).round() as usize;
+    format!(
+        "[{}{}]",
+        "#".repeat(filled),
+        "-".repeat(PROGRESS_BAR_WIDTH - filled)
+    )
+}
+
+fn human_size(bytes: u64) -> String {
+    let bytes = bytes as f64;
+    if bytes >= 1_000_000_000.0 {
+        format!("{:.2} GB", bytes / 1_000_000_000.0)
+    } else if bytes >= 1_000_000.0 {
+        format!("{:.0} MB", bytes / 1_000_000.0)
+    } else {
+        format!("{:.0} KB", bytes / 1_000.0)
+    }
+}
+
+fn human_rate(bytes_per_second: f64) -> String {
+    if bytes_per_second >= 1_000_000_000.0 {
+        format!("{:.2} GB", bytes_per_second / 1_000_000_000.0)
+    } else if bytes_per_second >= 1_000_000.0 {
+        format!("{:.1} MB", bytes_per_second / 1_000_000.0)
+    } else if bytes_per_second >= 1_000.0 {
+        format!("{:.0} KB", bytes_per_second / 1_000.0)
+    } else {
+        format!("{:.0} B", bytes_per_second)
+    }
+}
+
+fn human_eta(seconds: u64) -> String {
+    if seconds >= 3600 {
+        format!("{}h {:02}m", seconds / 3600, (seconds % 3600) / 60)
+    } else if seconds >= 60 {
+        format!("{}m {:02}s", seconds / 60, seconds % 60)
+    } else {
+        format!("{seconds}s")
+    }
+}
+
+fn progress_line(label: &str, done: u64, total: u64, resumed: u64, started: Instant) -> String {
+    let fraction = if total == 0 {
+        0.0
+    } else {
+        done as f64 / total as f64
+    };
+    let elapsed = started.elapsed().as_secs_f64();
+    let transferred = done.saturating_sub(resumed) as f64;
+    let speed = if elapsed >= 0.5 {
+        transferred / elapsed
+    } else {
+        0.0
+    };
+    let eta = if speed >= 1.0 {
+        human_eta(((total.saturating_sub(done)) as f64 / speed) as u64)
+    } else {
+        "--".to_string()
+    };
+    format!(
+        "{label}: {} {:.0}% | {} / {} | {}/s | ETA {eta}",
+        progress_bar(fraction),
+        fraction * 100.0,
+        human_size(done),
+        human_size(total),
+        human_rate(speed),
+    )
+}
+
+fn verify_line(label: &str, done: u64, total: u64) -> String {
+    let fraction = if total == 0 {
+        0.0
+    } else {
+        done as f64 / total as f64
+    };
+    format!(
+        "{label}: verifying SHA256 {} {:.0}%",
+        progress_bar(fraction),
+        fraction * 100.0
+    )
+}
+
 /// Applies paths produced by the worker. Called from the game thread while the settings window
 /// polls the label, because `Context` is not `Send`.
 pub fn take_completed() -> Option<(Option<PathBuf>, Option<PathBuf>)> {
@@ -203,10 +290,6 @@ pub fn handle_action(ctx: &mut Context, settings: &Settings, id: &str) {
         }
         CANCEL.store(true, Ordering::SeqCst);
         set_status("cancelling download... partial file will be kept".to_string());
-        return;
-    }
-    if id == "deps_check" {
-        set_status(describe(settings));
         return;
     }
 
@@ -518,8 +601,10 @@ fn download(
 
     let mut reader = response.into_reader();
     let mut buffer = vec![0u8; 1 << 20];
-    let mut written = if append { existing } else { 0 };
-    let mut last_report = written;
+    let resumed = if append { existing } else { 0 };
+    let started = Instant::now();
+    let mut last_report = Instant::now();
+    let mut written = resumed;
     loop {
         if cancelled() {
             let _ = file.flush();
@@ -536,13 +621,14 @@ fn download(
         file.write_all(&buffer[..count])
             .map_err(|error| format!("{label}: write failed: {error}"))?;
         written = written.saturating_add(count as u64);
-        if written.saturating_sub(last_report) >= 4 * 1024 * 1024 {
-            last_report = written;
-            set_status(format!(
-                "{label}: {:.1}/{:.1} GB ({:.0}%)",
-                written as f64 / 1_000_000_000.0,
-                expected_bytes as f64 / 1_000_000_000.0,
-                (written as f64 / expected_bytes as f64 * 100.0).min(100.0)
+        if last_report.elapsed() >= PROGRESS_INTERVAL {
+            last_report = Instant::now();
+            set_status(progress_line(
+                label,
+                written,
+                expected_bytes,
+                resumed,
+                started,
             ));
         }
     }
@@ -569,8 +655,11 @@ fn download(
 
 fn verify_sha256(path: &Path, expected: &str, label: &str) -> Result<(), String> {
     let mut file = File::open(path).map_err(|error| format!("cannot open {label}: {error}"))?;
+    let total = file.metadata().map(|meta| meta.len()).unwrap_or(0);
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; 1 << 20];
+    let mut read: u64 = 0;
+    let mut last_report = Instant::now();
     loop {
         if cancelled() {
             return Err(format!("{label}: cancelled while verifying"));
@@ -582,6 +671,11 @@ fn verify_sha256(path: &Path, expected: &str, label: &str) -> Result<(), String>
             break;
         }
         hasher.update(&buffer[..count]);
+        read = read.saturating_add(count as u64);
+        if last_report.elapsed() >= PROGRESS_INTERVAL {
+            last_report = Instant::now();
+            set_status(verify_line(label, read, total));
+        }
     }
     let digest = hasher.finalize();
     let actual = digest
@@ -675,7 +769,7 @@ fn find_file(root: &Path, name: &str) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_file, is_flash_path};
+    use super::{find_file, human_eta, human_size, is_flash_path, progress_bar};
     use crate::settings::SERVER_EXE_NAME;
     use std::fs;
     use std::path::Path;
@@ -703,6 +797,23 @@ mod tests {
         assert!(is_flash_path(Path::new("Clef-Flash-Q8_0.gguf")));
         assert!(is_flash_path(Path::new("Cloudflare_clef-flash-Q8_0.gguf")));
         assert!(!is_flash_path(Path::new("Cloudflare_clef-Q4_K_M.gguf")));
+    }
+
+    #[test]
+    fn draws_a_proportional_progress_bar() {
+        assert_eq!(progress_bar(0.0), "[------------]");
+        assert_eq!(progress_bar(0.5), "[######------]");
+        assert_eq!(progress_bar(1.0), "[############]");
+        assert_eq!(progress_bar(2.0), "[############]");
+    }
+
+    #[test]
+    fn formats_sizes_and_eta() {
+        assert_eq!(human_size(9_675_741_344), "9.68 GB");
+        assert_eq!(human_size(37_554_286), "38 MB");
+        assert_eq!(human_eta(42), "42s");
+        assert_eq!(human_eta(125), "2m 05s");
+        assert_eq!(human_eta(3_725), "1h 02m");
     }
 
     #[test]
