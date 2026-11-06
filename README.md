@@ -143,9 +143,9 @@ command builds the Rust library, the bridge, the XML assets and the companion as
 
 ```bash
 cd ../rimworld-rs
-cargo xtask build   --path ../rimworld-smart-colonists   # build/ColonistAutonomy
-cargo xtask install --path ../rimworld-smart-colonists   # <game>/Mods/ColonistAutonomy
-cargo xtask package --path ../rimworld-smart-colonists   # dist/ColonistAutonomy-0.1.0.zip
+cargo xtask build   --path ../rimworld-colonist-autonomy   # build/ColonistAutonomy
+cargo xtask install --path ../rimworld-colonist-autonomy   # <game>/Mods/ColonistAutonomy
+cargo xtask package --path ../rimworld-colonist-autonomy   # dist/ColonistAutonomy-0.1.0.zip
 ```
 
 The toolkit finds the game itself; set `RIMWORLD_DIR` to the game folder when it cannot.
@@ -153,7 +153,7 @@ The toolkit finds the game itself; set `RIMWORLD_DIR` to the game folder when it
 Add `--all-targets` to build the native library for every platform:
 
 ```bash
-cargo xtask package --path ../rimworld-smart-colonists --all-targets
+cargo xtask package --path ../rimworld-colonist-autonomy --all-targets
 ```
 
 Each target lands in `Rust/<rid>/` inside the mod, so one mod folder (and one Workshop item)
