@@ -177,6 +177,7 @@ the bridge disables those events and auto-start will not run. Quicktests had Har
 | Enabled | true | Disables the whole mod (including the ThinkTree node). |
 | Decision mode | Action (model picks target) | One of the four modes described below; the options window explains the selected one. |
 | Model server URL | `http://127.0.0.1:8081` | Address of `llama-server`. |
+| Server status / Test server | not tested | The probe runs on a worker thread; the label shows the result without blocking the game. |
 | Auto-start llama-server | false | When enabled, starts the server when entering a colony if `/health` does not respond. Off by default so the local server is not launched without an explicit opt-in. |
 | llama-server executable | `<install root>/llama.cpp/llama-server` (`llama-server.exe` on Windows) | Path to the server binary (auto-start/installer). |
 | Model file (.gguf) | `<install root>/models/Cloudflare_clef-flash-Q8_0.gguf` | Model passed as `-m` (auto-start/installer); the Q4 model can be selected instead. |
@@ -184,6 +185,7 @@ the bridge disables those events and auto-start will not run. Quicktests had Har
 | Refresh seconds | 30 | How often decisions are refreshed. |
 | Base confidence | 0.40 | The base for the per-action thresholds: work is relative to the question size (`max(0.20, 2.5 / options)`), capped at the old work baseline (`base - 0.10`), social 0.40, needs 0.35, threat 0.20, idle 0.50 (0.60 when alternatives exist), interrupt 0.60. At 16 options work is 0.20, at 8 it is 0.30, and at 6 or fewer it is 0.30. The decision panel shows the threshold and option count used for each decision. |
 | Interrupt current work | true | Whether an active refresh may interrupt current work. Interrupts also need the interrupt confidence and a job at least 5 seconds old; important jobs stay protected. |
+| Respect sleep schedule | true | Refuses a work job when the estimated travel plus work would not fit before the colonist's next Sleep block. Player-forced jobs, drafted/mental pawns, and firefighting, patient, and doctor work are never refused. The estimate is conservative (straight-line distance, 1.35x for obstacles) and does not reserve anything. A refused pawn is picked up by the `Humanlike_PreMain` fallback node so it can still choose a local action. |
 | Dry run | false | The model is asked and decisions are logged, but no jobs are issued. |
 | Debug log | false | Extra logs: candidates, questions, state, and `stale`/`busy` reasons. |
 | Last decision / Show recent decisions | — | A live one-line summary and a dialog with the last 20 decisions: choice, confidence, threshold, outcome, and the idle reason. |
@@ -192,13 +194,13 @@ the bridge disables those events and auto-start will not run. Quicktests had Har
 
 The **Decision mode** dropdown in the mod options offers:
 
-- **Intent (game picks target)** — a single `intent` question: food/sleep/joy, work type
-  (`work:Hauling`, `work:PlantCutting`, ...), social, flee, idle. Vanilla picks the concrete
-  target.
+- **Intent (game picks target)** — a single `intent` question: food/sleep/joy, drugs allowed by
+  the pawn's policy, work type (`work:Hauling`, `work:PlantCutting`, ...), social, flee, idle.
+  Vanilla picks the concrete target.
 - **Action (model picks target)** — the default. One flat list of concrete actions:
-  `work:PlantsCut:<id>`, `social:<id>`, `eat`, `sleep`, `joy`, `flee`, `hide`, `idle`. For
-  work/social/flee the model also picks the target; for needs, vanilla picks the target
-  (best meal/bed/joy).
+  `work:PlantsCut:<id>`, `drug:<id>`, `social:<id>`, `eat`, `sleep`, `joy`, `flee`, `hide`,
+  `idle`. For work/social/flee the model also picks the target; for needs and drugs, vanilla
+  picks the target (best meal/bed/joy/drug).
 - **Intent + target (two steps)** — one request with several questions: `intent` +
   `work_target`/`social_target`/`threat_target`. The model compares targets only within the
   chosen intent.
@@ -215,9 +217,17 @@ shows the threshold that was applied to each entry.
   WorkGiver, up to 8 WorkGivers per type, and a fallback scan of the map or a 16-cell radius
   when a scanner exposes no global list. If no concrete target is found, the top work types are
   offered as `work:<type>` so vanilla can pick the target.
+- With **Respect sleep schedule** on, concrete work whose travel plus estimated work does not fit
+  before the next Sleep block is removed from the candidate list. The same estimate backs a
+  Harmony prefix on `Pawn_JobTracker.StartJob`, so the job never starts and takes no reservations.
+  A refused pawn is marked as gated and `ClefGatedThinkNode` (inserted at `Humanlike_PreMain`)
+  asks the model for a local action instead of leaving the colonist idle.
+- Work descriptions append `enemy Nm` when the nearest hostile is within 15 cells of the target,
+  so the model can avoid hauling or building next to a raid without a hard rule.
 - Impossible needs are filtered: `eat` requires meals, edible nutrition, or food in the pawn's
   inventory; `joy` requires a joy source on the map or enjoyable weather. Sleep stays available
-  because vanilla can sleep on the ground.
+  because vanilla can sleep on the ground. Drugs are offered only when the pawn's drug policy
+  allows them for joy and the mood/joy thresholds match.
 - The colony block now carries `bills`, `growing_zones`, `stockpiles`, `construction`,
   `designations`, `hostiles`, `research`, and `research_progress`, so the model can favour a
   real backlog instead of guessing.
@@ -250,8 +260,9 @@ At the `colony` level: `colonists`, `idle`, `meals`, `medicine`, `steel`, `compo
 Option descriptions carry the "why", not just the label:
 
 ```text
-work:HaulGeneral:123  -> "haul 75 steel (12m, deteriorating, prio 2, Hauling 3)"
+work:HaulGeneral:123  -> "haul 75 steel (12m, deteriorating, enemy 8m, prio 2, Hauling 3)"
 eat                   -> "Eat a meal (food: Starving, colony meals: 2)"
+drug:789              -> "Take smokeleaf joint (drug x3, addictive)"
 social:456            -> "Talk with Jan (lover, opinion +40)"
 flee                  -> "Flee from 3 hostiles, nearest 8m N (unarmed, cover 20%)"
 ```
@@ -307,6 +318,14 @@ BBCode in `workshop/description.bbcode.txt`); `WORKSHOP.md` keeps the longer sou
 
 ## Limitations and notes
 
+- **Multiplayer is not supported.** Model-driven jobs and the schedule gate run on the local
+  client only; expect desyncs with multiplayer mods.
+- The sleep gate is a conservative estimate, not a scheduler: it looks only at the next **Sleep**
+  block, uses straight-line distance plus work-type durations, and never refuses player-forced
+  jobs, drafted/mental pawns, or firefighting, patient and doctor work.
+- Scheduled drug policies (for example penoxycyline) and tending patients stay with vanilla. Drug
+  candidates cover only drugs the pawn's policy allows for joy; the model does not override the
+  policy and does not self-treat.
 - Needs (`eat`/`sleep`/`joy`) get their target from vanilla; the model chooses the **type** of
   action.
 - Social uses a custom `JobDriver` (`SmartColonists_ClefSocialize`) and
@@ -332,8 +351,9 @@ cargo clippy --all-targets -- -D warnings
 
 Run them against the same `rimworld-rs` line used to build (the one with
 `SettingSpec::action`/`label`/`choice`). Unit tests cover the response parser, mode selection,
-state truncation, settings, per-action and relative work thresholds, Hybrid selection,
-unique-target keys, and the installer helpers. Verified in game on Linux: mod and companion startup, the HTTP decision loop
+state truncation, settings, per-action and relative work thresholds, the drug action kind and
+threshold, the server health probe, Hybrid selection, unique-target keys, and the installer
+helpers. Verified in game on Linux: mod and companion startup, the HTTP decision loop
 against a local server, low confidence → vanilla, and actual job application in the original
 three modes plus Hybrid (`SmartColonists_ClefSocialize`).
 
@@ -341,6 +361,23 @@ On macOS the in-game check covered mod and companion startup, the HTTP decision 
 local server, server auto-start with the expected arguments, and server stop when the game
 quits. The ignored installer tests also downloaded, extracted and ran the pinned macOS
 `llama.cpp` package successfully.
+
+### In-game self-test
+
+The companion carries a smoke test that runs only when the game is launched with
+`-clefselftest`. The flag also makes the Rust side skip the dependency prompt and the model
+server, so the test needs no model and no network:
+
+```bash
+# from the rimworld-rs checkout, with this mod installed
+cargo xtask run -- -quicktest -clefselftest -mod=brrainz.harmony,snowdrop.colonistautonomy
+```
+
+It runs after the quicktest map is ready, logs `[selftest] PASS/FAIL/SKIP` lines, and ends with
+`[selftest] summary N passed, N failed, N skipped`. The suite covers ThinkTree defs, settings
+labels, candidate and question generation in all four modes, job builders, drug candidates and
+jobs, the schedule gate, the gated `Humanlike_PreMain` node, and the state payload. The latest
+run reported 46 passed, 0 failed, 0 skipped.
 
 ## Disclaimer
 

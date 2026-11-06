@@ -577,6 +577,23 @@ fn download(
         return Ok(());
     }
 
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create {label} directory: {error}"))?;
+        let available = fs4::available_space(parent)
+            .map_err(|error| format!("{label}: cannot check free disk space: {error}"))?;
+        let needed = expected_bytes
+            .saturating_sub(existing)
+            .saturating_add(256 * 1024 * 1024);
+        if available < needed {
+            return Err(format!(
+                "{label}: not enough disk space: {:.1} GB needed, {:.1} GB free",
+                needed as f64 / 1_000_000_000.0,
+                available as f64 / 1_000_000_000.0
+            ));
+        }
+    }
+
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(15))
         .timeout_read(Duration::from_secs(120))
@@ -678,10 +695,7 @@ fn verify_sha256(path: &Path, expected: &str, label: &str) -> Result<(), String>
         }
     }
     let digest = hasher.finalize();
-    let actual = digest
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
+    let actual = hex::encode(digest);
     if actual.eq_ignore_ascii_case(expected) {
         Ok(())
     } else {
@@ -776,20 +790,18 @@ mod tests {
 
     #[test]
     fn finds_a_file_in_a_nested_directory() {
-        let root = std::env::temp_dir().join("smart-colonists-find-file-test");
-        let nested = root.join("build").join("bin");
-        let _ = fs::remove_dir_all(&root);
+        let dir = tempfile::tempdir().expect("create a temp dir");
+        let nested = dir.path().join("build").join("bin");
         fs::create_dir_all(&nested).expect("create test dir");
         let file = nested.join(SERVER_EXE_NAME);
         fs::write(&file, b"test").expect("write test file");
-        assert_eq!(find_file(&root, SERVER_EXE_NAME), Some(file));
-        let _ = fs::remove_dir_all(&root);
+        assert_eq!(find_file(dir.path(), SERVER_EXE_NAME), Some(file));
     }
 
     #[test]
     fn returns_none_for_a_missing_file() {
-        let root = std::env::temp_dir();
-        assert!(find_file(&root, "this-file-does-not-exist-42").is_none());
+        let dir = tempfile::tempdir().expect("create a temp dir");
+        assert!(find_file(dir.path(), "this-file-does-not-exist-42").is_none());
     }
 
     #[test]
@@ -819,9 +831,8 @@ mod tests {
     #[test]
     #[ignore = "downloads the pinned llama.cpp archive from GitHub"]
     fn downloads_extracts_and_runs_llama() {
-        let root = std::env::temp_dir().join("smart-colonists-installer-download-test");
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).expect("create test root");
+        let dir = tempfile::tempdir().expect("create a temp dir");
+        let root = dir.path();
 
         let archive = root.join(super::LLAMA_PACKAGE.file);
         super::download(
@@ -849,8 +860,6 @@ mod tests {
             "llama-server --version failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-
-        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

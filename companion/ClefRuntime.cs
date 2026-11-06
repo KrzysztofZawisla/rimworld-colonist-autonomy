@@ -33,6 +33,7 @@ namespace SmartColonistsCompanion
         public static float InterruptConfidence = 0.60f;
         public static bool DryRun;
         public static bool Debug;
+        public static bool RespectSchedule = true;
 
         private static readonly Dictionary<long, int> LastBuildTick = new Dictionary<long, int>();
         private static readonly Dictionary<long, List<DecisionRecord>> RecentDecisions =

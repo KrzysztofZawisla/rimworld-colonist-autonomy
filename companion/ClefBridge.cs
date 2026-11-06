@@ -29,7 +29,8 @@ namespace SmartColonistsCompanion
             float minConfidence,
             bool dryRun,
             bool debug,
-            float interruptConfidence)
+            float interruptConfidence,
+            bool respectSchedule)
         {
             ClefRuntime.Enabled = enabled;
             ClefRuntime.Mode = Math.Max(0, Math.Min(3, mode));
@@ -38,7 +39,14 @@ namespace SmartColonistsCompanion
             ClefRuntime.InterruptConfidence = Math.Max(0f, Math.Min(1f, interruptConfidence));
             ClefRuntime.DryRun = dryRun;
             ClefRuntime.Debug = debug;
+            ClefRuntime.RespectSchedule = respectSchedule;
             return "configured";
+        }
+
+        public static string ResetGate()
+        {
+            ClefScheduleGate.Reset();
+            return "reset";
         }
 
         /// <summary>Builds a payload for every eligible colonist whose refresh window elapsed.</summary>

@@ -28,28 +28,9 @@ pub fn install_root() -> PathBuf {
     if let Some(root) = std::env::var_os("COLONIST_AUTONOMY_HOME") {
         return PathBuf::from(root);
     }
-    #[cfg(windows)]
-    {
-        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-            return PathBuf::from(local).join("ColonistAutonomy");
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join("Library/Application Support/ColonistAutonomy");
-        }
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        if let Some(data) = std::env::var_os("XDG_DATA_HOME") {
-            return PathBuf::from(data).join("ColonistAutonomy");
-        }
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(".local/share/ColonistAutonomy");
-        }
-    }
-    std::env::temp_dir().join("ColonistAutonomy")
+    dirs::data_local_dir()
+        .map(|dir| dir.join("ColonistAutonomy"))
+        .unwrap_or_else(|| std::env::temp_dir().join("ColonistAutonomy"))
 }
 
 fn default_server_exe() -> String {
@@ -77,6 +58,7 @@ pub struct Settings {
     pub refresh_seconds: u32,
     pub min_confidence: f64,
     pub interrupt_work: bool,
+    pub respect_schedule: bool,
     pub dry_run: bool,
     pub debug: bool,
     pub model: String,
@@ -101,6 +83,7 @@ impl Settings {
             ActionKind::Work => self.work_threshold(options),
             ActionKind::Social => base,
             ActionKind::Need => (base - 0.05).max(0.05),
+            ActionKind::Drug => base,
             ActionKind::Threat => (base - 0.20).max(0.05),
             ActionKind::Idle => {
                 let alternatives = probabilities
@@ -134,6 +117,7 @@ impl Default for Settings {
             refresh_seconds: 30,
             min_confidence: 0.40,
             interrupt_work: true,
+            respect_schedule: true,
             dry_run: false,
             debug: false,
             model: "clef".to_string(),
@@ -166,9 +150,12 @@ pub fn register(ctx: &mut Context) -> rimworld_rs::Result<()> {
         ),
         SettingSpec::label("mode_status", "Mode details"),
         SettingSpec::string("server_url", "Model server URL", "http://127.0.0.1:8081"),
+        SettingSpec::label("server_status", "Server status"),
+        SettingSpec::action("server_test", "Test server"),
         SettingSpec::int("refresh_seconds", "Refresh seconds", 30, 5.0, 300.0),
         SettingSpec::float("min_confidence", "Base confidence", 0.40, 0.0, 1.0),
         SettingSpec::bool("interrupt_work", "Interrupt current work", true),
+        SettingSpec::bool("respect_schedule", "Respect sleep schedule", true),
         SettingSpec::bool("dry_run", "Dry run (log only)", false),
         SettingSpec::bool("debug", "Debug log", false),
         SettingSpec::label("decisions_status", "Last decision"),
@@ -227,6 +214,9 @@ pub fn load(ctx: &Context) -> rimworld_rs::Result<Settings> {
     if let Some(value) = ctx.setting_get("interrupt_work")? {
         settings.interrupt_work = parse_bool(&value, settings.interrupt_work);
     }
+    if let Some(value) = ctx.setting_get("respect_schedule")? {
+        settings.respect_schedule = parse_bool(&value, settings.respect_schedule);
+    }
     if let Some(value) = ctx.setting_get("dry_run")? {
         settings.dry_run = parse_bool(&value, settings.dry_run);
     }
@@ -272,6 +262,11 @@ mod tests {
     }
 
     #[test]
+    fn the_sleep_gate_is_on_by_default() {
+        assert!(Settings::default().respect_schedule);
+    }
+
+    #[test]
     fn thresholds_follow_the_action_kind() {
         let settings = Settings::default();
         assert!((settings.threshold_for("work:HaulGeneral:1", &[], 16) - 0.20).abs() < 1e-9);
@@ -279,6 +274,7 @@ mod tests {
         assert!((settings.threshold_for("work:HaulGeneral:1", &[], 6) - 0.30).abs() < 1e-9);
         assert!((settings.threshold_for("work:HaulGeneral:1", &[], 4) - 0.30).abs() < 1e-9);
         assert!((settings.threshold_for("social:1", &[], 16) - 0.40).abs() < 1e-9);
+        assert!((settings.threshold_for("drug:1", &[], 16) - 0.40).abs() < 1e-9);
         assert!((settings.threshold_for("eat", &[], 16) - 0.35).abs() < 1e-9);
         assert!((settings.threshold_for("flee", &[], 16) - 0.20).abs() < 1e-9);
         assert!((settings.threshold_for("idle", &[], 16) - 0.50).abs() < 1e-9);

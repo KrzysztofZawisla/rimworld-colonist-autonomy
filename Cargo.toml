@@ -23,8 +23,10 @@ flate2 = { version = "1", default-features = false, features = [
 ] }
 tar = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
-
-[profile]
+dirs = "7.0.0"
+fs4 = "1.1.0"
+url = "2.5.8"
+hex = "0.4.3"
 
 [profile.release]
 opt-level = 3
@@ -34,3 +36,7 @@ panic = "unwind"
 incremental = false
 debug = false
 overflow-checks = false
+
+[dev-dependencies]
+mockito = "1.7.2"
+tempfile = "3.27.0"

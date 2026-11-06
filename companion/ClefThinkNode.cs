@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using RustBridge;
 using Verse;
@@ -12,6 +13,11 @@ namespace SmartColonistsCompanion
     public class ClefThinkNode : ThinkNode_JobGiver
     {
         protected override Job TryGiveJob(Pawn pawn)
+        {
+            return Decide(pawn, null);
+        }
+
+        internal static Job Decide(Pawn pawn, Func<Job, bool> accept)
         {
             if (!ClefRuntime.Ready || !ClefRuntime.Enabled || !ClefEligibility.CanDecide(pawn))
             {
@@ -45,6 +51,11 @@ namespace SmartColonistsCompanion
                 Job job = ClefJobs.Build(pawn, chosen);
                 if (job != null)
                 {
+                    if (accept != null && !accept(job))
+                    {
+                        ClefRuntime.RecordDecision(pawn.thingIDNumber, chosen, confidence, "refused");
+                        return null;
+                    }
                     ClefRuntime.RecordDecision(pawn.thingIDNumber, chosen, confidence, "applied");
                     Log.Message("[ColonistAutonomy] think node: " + pawn.LabelShort + " -> " + job.def.defName
                         + " (" + chosen + ")");

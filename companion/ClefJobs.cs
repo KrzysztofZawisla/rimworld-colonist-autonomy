@@ -37,6 +37,8 @@ namespace SmartColonistsCompanion
                     return Giver<JobGiver_GetRest>(pawn);
                 case "joy":
                     return Giver<JobGiver_GetJoy>(pawn);
+                case "drug":
+                    return Drug(pawn, parts);
                 case "social":
                     return Social(pawn, parts.Length > 1 ? parts[1] : null);
                 case "flee":
@@ -79,6 +81,40 @@ namespace SmartColonistsCompanion
                 LogOnce(error);
                 return null;
             }
+        }
+
+        private static Job Drug(Pawn pawn, string[] parts)
+        {
+            if (parts.Length < 2 || !long.TryParse(parts[1], out long id))
+            {
+                return Fail("malformed drug option");
+            }
+            if (pawn.Map == null || pawn.drugs == null || pawn.drugs.CurrentPolicy == null)
+            {
+                return Fail("drug option without a map or policy");
+            }
+            Thing drug = FindThing(pawn.Map, id);
+            if (drug == null || !drug.Spawned || drug.def == null)
+            {
+                return Fail("drug " + id + " is gone");
+            }
+            DrugPolicyEntry entry = pawn.drugs.CurrentPolicy[drug.def];
+            if (entry == null || !entry.allowedForJoy)
+            {
+                return Fail("drug policy forbids joy use of " + drug.def.defName);
+            }
+            if (drug.IsForbidden(pawn))
+            {
+                return Fail("drug is forbidden");
+            }
+            if (!pawn.CanReach(new LocalTargetInfo(drug), PathEndMode.Touch, Danger.Deadly))
+            {
+                return Fail("cannot reach drug " + id);
+            }
+            return DrugAIUtility.IngestAndTakeToInventoryJob(
+                drug,
+                pawn,
+                Math.Max(1, entry.takeToInventory));
         }
 
         private static Job Work(Pawn pawn, string[] parts)

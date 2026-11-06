@@ -61,6 +61,7 @@ pub enum ActionKind {
     Work,
     Social,
     Need,
+    Drug,
     Threat,
     Idle,
     Other,
@@ -74,6 +75,8 @@ impl ActionKind {
             Self::Social
         } else if matches!(chosen, "eat" | "sleep" | "joy") {
             Self::Need
+        } else if chosen.starts_with("drug:") {
+            Self::Drug
         } else if matches!(chosen, "flee" | "hide") {
             Self::Threat
         } else if chosen == "idle" {
@@ -88,6 +91,7 @@ impl ActionKind {
             Self::Work => "work",
             Self::Social => "social",
             Self::Need => "need",
+            Self::Drug => "drug",
             Self::Threat => "threat",
             Self::Idle => "idle",
             Self::Other => "other",
@@ -236,6 +240,12 @@ mod tests {
         ] {
             assert_eq!(Mode::from_i32(mode.as_i32()), mode);
         }
+    }
+
+    #[test]
+    fn drug_options_have_their_own_kind() {
+        assert_eq!(ActionKind::of("drug:123"), ActionKind::Drug);
+        assert_eq!(ActionKind::Drug.label(), "drug");
     }
 
     #[test]

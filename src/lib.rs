@@ -16,12 +16,21 @@ use state::PluginState;
 
 const BRIDGE_TYPE: &str = "SmartColonistsCompanion.ClefBridge";
 
+fn self_test_mode() -> bool {
+    std::env::args().any(|arg| {
+        arg.trim_start_matches('-')
+            .eq_ignore_ascii_case("clefselftest")
+    })
+}
+
 #[derive(Default)]
 struct Plugin {
     settings: Settings,
     state: PluginState,
     prompted_dependencies: bool,
     pending_dependency_prompt: bool,
+    gate_installed: bool,
+    gate_error_logged: bool,
 }
 
 impl Mod for Plugin {
@@ -38,6 +47,7 @@ impl Mod for Plugin {
     }
 
     fn on_defs_loaded(&mut self, ctx: &mut Context) {
+        self.install_schedule_gate(ctx);
         match ctx.companion_call(BRIDGE_TYPE, "Init", &[]) {
             Ok(value) => {
                 let ready = value.as_str() == Some("ready");
@@ -97,6 +107,9 @@ impl Mod for Plugin {
             if payload.get("id").and_then(Value::as_str) == Some("decisions_status") {
                 return Some(self.state.last_decision_summary());
             }
+            if payload.get("id").and_then(Value::as_str) == Some("server_status") {
+                return Some(clef::health::status());
+            }
             if let Some((exe, model)) = installer::take_completed() {
                 if let Some(path) = exe {
                     let value = path.to_string_lossy().into_owned();
@@ -129,14 +142,97 @@ impl Mod for Plugin {
                 self.state.show_decisions(ctx);
                 return;
             }
+            if action.id == "server_test" {
+                clef::health::test(self.settings.server_url.clone());
+                return;
+            }
             installer::handle_action(ctx, &self.settings, &action.id);
+        }
+    }
+
+    fn on_patch_call(&mut self, ctx: &mut Context, call: &PatchCall) -> PatchOutcome {
+        if call.handler != "job_schedule_gate" {
+            return PatchOutcome::default();
+        }
+        if !self.settings.enabled || !self.settings.respect_schedule {
+            return PatchOutcome::default();
+        }
+        let Some(tracker) = call.instance.as_ref() else {
+            return PatchOutcome::default();
+        };
+        let job = call.args.first().cloned().unwrap_or(Value::Null);
+        match ctx.companion_call(
+            "SmartColonistsCompanion.ClefScheduleGate",
+            "Allow",
+            &[tracker.clone(), job],
+        ) {
+            Ok(answer) => {
+                let denied = answer.as_bool() == Some(false) || answer.as_str() == Some("false");
+                if denied {
+                    PatchOutcome::default().skip_original()
+                } else {
+                    PatchOutcome::default()
+                }
+            }
+            Err(error) => {
+                if !self.gate_error_logged {
+                    self.gate_error_logged = true;
+                    ctx.warn(format!(
+                        "[ColonistAutonomy] schedule gate call failed: {error}"
+                    ));
+                }
+                PatchOutcome::default()
+            }
         }
     }
 }
 
 impl Plugin {
+    fn install_schedule_gate(&mut self, ctx: &mut Context) {
+        if self.gate_installed {
+            return;
+        }
+        let params = [
+            "Job",
+            "JobCondition",
+            "ThinkNode",
+            "bool",
+            "bool",
+            "ThinkTreeDef",
+            "Nullable<JobTag>",
+            "bool",
+            "bool",
+            "Nullable<bool>",
+            "bool",
+            "bool",
+            "bool",
+        ];
+        match ctx.harmony_patch_with_params(
+            "Verse.AI.Pawn_JobTracker",
+            "StartJob",
+            &params,
+            PatchKind::Prefix,
+            "job_schedule_gate",
+        ) {
+            Ok(()) => {
+                self.gate_installed = true;
+                ctx.log("[ColonistAutonomy] schedule gate installed");
+            }
+            Err(error) => ctx.warn(format!(
+                "[ColonistAutonomy] schedule gate unavailable: {error}"
+            )),
+        }
+    }
+
     fn start(&mut self, ctx: &mut Context, why: &str) {
         self.state.reset();
+        if let Err(error) = ctx.companion_call(BRIDGE_TYPE, "ResetGate", &[]) {
+            crate::log::debug(
+                ctx,
+                &self.settings,
+                format!("cannot reset the schedule gate: {error}"),
+            );
+        }
         self.reload(ctx);
         self.schedule_dependency_prompt();
         self.ensure_server(ctx);
@@ -153,7 +249,7 @@ impl Plugin {
     }
 
     fn schedule_dependency_prompt(&mut self) {
-        if self.prompted_dependencies || self.pending_dependency_prompt {
+        if self.prompted_dependencies || self.pending_dependency_prompt || self_test_mode() {
             return;
         }
         if installer::dependencies_present(&self.settings) {
@@ -166,7 +262,7 @@ impl Plugin {
     }
 
     fn flush_dependency_prompt(&mut self, ctx: &mut Context) {
-        if !self.pending_dependency_prompt || self.prompted_dependencies {
+        if !self.pending_dependency_prompt || self.prompted_dependencies || self_test_mode() {
             return;
         }
         self.pending_dependency_prompt = false;
@@ -199,6 +295,9 @@ impl Plugin {
     }
 
     fn ensure_server(&self, ctx: &mut Context) {
+        if self_test_mode() {
+            return;
+        }
         if !installer::dependencies_present(&self.settings)
             && !clef::client::healthy(&self.settings.server_url)
         {
