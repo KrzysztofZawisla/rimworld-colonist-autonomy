@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using RimWorld;
 using Verse;
+using Verse.AI;
 
 namespace SmartColonistsCompanion
 {
@@ -39,6 +40,7 @@ namespace SmartColonistsCompanion
         private const int MaxFallbackThings = 800;
         private const int FallbackRadius = 16;
         private const int FallbackThingRadius = 30;
+        private const int MaxDrugOptions = 4;
 
         public static ClefCandidatePools Build(
             Pawn pawn,
@@ -48,7 +50,8 @@ namespace SmartColonistsCompanion
         {
             var pools = new ClefCandidatePools();
             AddNeeds(pawn, pools, signals, colony);
-            AddWork(pawn, pools, scanTargets);
+            AddDrugs(pawn, pools);
+            AddWork(pawn, pools, scanTargets, HostilePositions(pawn.Map));
             AddSocial(pawn, pools);
             AddThreat(pawn, pools, signals);
             pools.Idle.Add(new ClefOption("idle", "Wander / do nothing"));
@@ -110,6 +113,64 @@ namespace SmartColonistsCompanion
             }
         }
 
+        private static void AddDrugs(Pawn pawn, ClefCandidatePools pools)
+        {
+            if (pawn.drugs == null || pawn.drugs.CurrentPolicy == null || pawn.Map == null
+                || pawn.needs == null)
+            {
+                return;
+            }
+            List<Thing> drugs;
+            try
+            {
+                drugs = pawn.Map.listerThings.ThingsInGroup(ThingRequestGroup.Drug);
+            }
+            catch (Exception error)
+            {
+                LogOnce(error, "AddDrugs");
+                return;
+            }
+
+            int added = 0;
+            foreach (Thing thing in drugs)
+            {
+                if (added >= MaxDrugOptions)
+                {
+                    return;
+                }
+                if (thing == null || !thing.Spawned || thing.def == null)
+                {
+                    continue;
+                }
+                DrugPolicyEntry entry = pawn.drugs.CurrentPolicy[thing.def];
+                if (entry == null || !entry.allowedForJoy)
+                {
+                    continue;
+                }
+                if (entry.onlyIfMoodBelow < 1f && pawn.needs.mood != null
+                    && pawn.needs.mood.CurLevelPercentage >= entry.onlyIfMoodBelow)
+                {
+                    continue;
+                }
+                if (entry.onlyIfJoyBelow < 1f && pawn.needs.joy != null
+                    && pawn.needs.joy.CurLevelPercentage >= entry.onlyIfJoyBelow)
+                {
+                    continue;
+                }
+                if (thing.IsForbidden(pawn)
+                    || !pawn.CanReach(new LocalTargetInfo(thing), PathEndMode.Touch, Danger.Deadly))
+                {
+                    continue;
+                }
+                CompProperties_Drug props = thing.def.GetCompProperties<CompProperties_Drug>();
+                string risk = props != null && props.Addictive ? ", addictive" : "";
+                pools.Needs.Add(new ClefOption(
+                    "drug:" + thing.thingIDNumber,
+                    "Take " + thing.LabelShort + " (drug x" + thing.stackCount + risk + ")"));
+                added++;
+            }
+        }
+
         private static bool CarriesFood(Pawn pawn)
         {
             Thing carried = pawn.carryTracker != null ? pawn.carryTracker.CarriedThing : null;
@@ -153,7 +214,11 @@ namespace SmartColonistsCompanion
             }
         }
 
-        private static void AddWork(Pawn pawn, ClefCandidatePools pools, bool scanTargets)
+        private static void AddWork(
+            Pawn pawn,
+            ClefCandidatePools pools,
+            bool scanTargets,
+            List<IntVec3> hostiles)
         {
             if (pawn.workSettings == null)
             {
@@ -236,10 +301,18 @@ namespace SmartColonistsCompanion
                         {
                             continue;
                         }
+                        if (!ClefScheduleGate.FitsSchedule(
+                            pawn,
+                            new LocalTargetInfo(thing),
+                            LocalTargetInfo.Invalid,
+                            def.workType != null ? def.workType.defName : null))
+                        {
+                            continue;
+                        }
                         AddWork(
                             pools,
                             "work:" + def.defName + ":" + thing.thingIDNumber,
-                            WorkThingDescription(def, thing, pawn));
+                            WorkThingDescription(def, thing, pawn, hostiles));
                         added++;
                         if (added >= MaxThingsPerGiver)
                         {
@@ -257,10 +330,18 @@ namespace SmartColonistsCompanion
                         {
                             continue;
                         }
+                        if (!ClefScheduleGate.FitsSchedule(
+                            pawn,
+                            new LocalTargetInfo(cell),
+                            LocalTargetInfo.Invalid,
+                            def.workType != null ? def.workType.defName : null))
+                        {
+                            continue;
+                        }
                         AddWork(
                             pools,
                             "work:" + def.defName + ":cell:" + cell.x + "," + cell.z,
-                            WorkCellDescription(def, cell, pawn));
+                            WorkCellDescription(def, cell, pawn, hostiles));
                         added++;
                         if (added >= MaxThingsPerGiver + MaxCellsPerGiver)
                         {
@@ -408,7 +489,11 @@ namespace SmartColonistsCompanion
                 (signals.Indoors ? "Stay indoors" : "Get indoors") + " (" + where + ")"));
         }
 
-        private static string WorkThingDescription(WorkGiverDef def, Thing thing, Pawn pawn)
+        private static string WorkThingDescription(
+            WorkGiverDef def,
+            Thing thing,
+            Pawn pawn,
+            List<IntVec3> hostiles)
         {
             var tags = new List<string>();
             if (thing.stackCount > 1)
@@ -446,14 +531,61 @@ namespace SmartColonistsCompanion
 
             string detail = tags.Count > 0 ? ", " + string.Join(", ", tags.ToArray()) : "";
             return def.label + " " + thing.LabelShort + " ("
-                + Distance(pawn.Position, thing.Position) + "m" + detail + ", "
+                + Distance(pawn.Position, thing.Position) + "m" + detail
+                + EnemyTag(thing.Position, hostiles) + ", "
                 + WorkMeta(def, pawn) + ")";
         }
 
-        private static string WorkCellDescription(WorkGiverDef def, IntVec3 cell, Pawn pawn)
+        private static string WorkCellDescription(
+            WorkGiverDef def,
+            IntVec3 cell,
+            Pawn pawn,
+            List<IntVec3> hostiles)
         {
             return def.label + " at (" + cell.x + "," + cell.z + ") ("
-                + Distance(pawn.Position, cell) + "m, " + WorkMeta(def, pawn) + ")";
+                + Distance(pawn.Position, cell) + "m" + EnemyTag(cell, hostiles) + ", "
+                + WorkMeta(def, pawn) + ")";
+        }
+
+        private static List<IntVec3> HostilePositions(Map map)
+        {
+            var cells = new List<IntVec3>();
+            if (map == null || map.mapPawns == null)
+            {
+                return cells;
+            }
+            Faction player = Faction.OfPlayerSilentFail;
+            if (player == null)
+            {
+                return cells;
+            }
+            foreach (Pawn other in map.mapPawns.AllPawnsSpawned)
+            {
+                if (other != null && other.Spawned && other.Faction != null
+                    && other.Faction.HostileTo(player))
+                {
+                    cells.Add(other.Position);
+                }
+            }
+            return cells;
+        }
+
+        private static string EnemyTag(IntVec3 cell, List<IntVec3> hostiles)
+        {
+            if (hostiles == null || hostiles.Count == 0)
+            {
+                return "";
+            }
+            float best = float.MaxValue;
+            foreach (IntVec3 hostile in hostiles)
+            {
+                float distance = hostile.DistanceTo(cell);
+                if (distance < best)
+                {
+                    best = distance;
+                }
+            }
+            return best <= 15f ? ", enemy " + (int)Math.Round(best) + "m" : "";
         }
 
         private static string WorkMeta(WorkGiverDef def, Pawn pawn)

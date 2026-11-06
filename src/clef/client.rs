@@ -181,6 +181,14 @@ mod tests {
     }
 
     #[test]
+    fn healthy_accepts_a_local_server() {
+        let mut server = mockito::Server::new();
+        let health = server.mock("GET", "/health").with_status(200).create();
+        assert!(healthy(&server.url()));
+        health.assert();
+    }
+
+    #[test]
     fn the_agent_pool_rebuilds_only_when_the_url_or_timeout_changes() {
         let mut pool = AgentPool::default();
         let config = Config {

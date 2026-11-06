@@ -85,6 +85,7 @@ impl PluginState {
                 json!(settings.dry_run),
                 json!(settings.debug),
                 json!(settings.interrupt_threshold()),
+                json!(settings.respect_schedule),
             ],
         ) {
             log::warn(ctx, format!("cannot configure the companion: {error}"));

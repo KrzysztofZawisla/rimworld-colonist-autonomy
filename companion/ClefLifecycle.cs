@@ -30,6 +30,7 @@ namespace SmartColonistsCompanion
 
         private void Update()
         {
+            ClefSelfTest.TryRun();
             if (Current.ProgramState == ProgramState.Playing)
             {
                 stopped = false;

@@ -144,26 +144,25 @@ pub fn stop() -> bool {
 }
 
 fn local_host_port(server_url: &str) -> Result<(String, u16), String> {
-    let rest = server_url.trim().trim_end_matches('/');
-    let rest = rest
-        .strip_prefix("http://")
-        .ok_or_else(|| "auto-start supports only plain http:// URLs".to_string())?;
-    let authority = rest.split('/').next().unwrap_or(rest);
-    let (host, port) = authority
-        .rsplit_once(':')
-        .ok_or_else(|| format!("server URL has no port: {server_url}"))?;
-    let host = match host {
-        "localhost" => "127.0.0.1",
-        other => other,
+    let url = url::Url::parse(server_url.trim())
+        .map_err(|error| format!("invalid server URL: {error}"))?;
+    if url.scheme() != "http" {
+        return Err("auto-start supports only plain http:// URLs".to_string());
+    }
+    let host = url.host_str().unwrap_or("");
+    let host = if host.eq_ignore_ascii_case("localhost") {
+        "127.0.0.1"
+    } else {
+        host
     };
     if host != "127.0.0.1" {
         return Err(format!(
             "auto-start supports only 127.0.0.1/localhost, got {host}"
         ));
     }
-    let port = port
-        .parse::<u16>()
-        .map_err(|_| format!("invalid server port: {port}"))?;
+    let port = url
+        .port()
+        .ok_or_else(|| format!("server URL has no port: {server_url}"))?;
     Ok((host.to_string(), port))
 }
 
