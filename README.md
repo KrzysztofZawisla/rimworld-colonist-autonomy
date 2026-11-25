@@ -353,9 +353,9 @@ title prefix (`chore(ci):` for workflows) for:
 
 - **Rust** — the crate graph in `Cargo.toml` and `Cargo.lock`. Minor and patch updates arrive as a
   single grouped pull request, and major updates one per crate, so a breaking release is reviewed
-  on its own. The `increase-if-necessary` strategy leaves a caret range in `Cargo.toml` alone when
-  it already allows the new release and raises it only when it does not, so the manifest stays tidy
-  while `Cargo.lock` moves. The `rimworld-rs` path dependency is outside Dependabot's reach.
+  on its own. Cargo's default strategy leaves a caret range alone when it already allows the new
+  release and raises it only when it does not, so `Cargo.toml` stays tidy while `Cargo.lock` moves.
+  The `rimworld-rs` path dependency is outside Dependabot's reach.
 - **C#** — the companion project in `companion/`. It references the game's assemblies rather than
   NuGet, so this entry stays silent until the project gains a `PackageReference`.
 - **GitHub Actions** — the workflows under `.github/workflows/`, once any exist.
